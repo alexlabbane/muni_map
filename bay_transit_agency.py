@@ -2,7 +2,7 @@ import json
 import requests
 from abc import ABC, abstractmethod
 from typing import Dict, List
-from gtfs_transit_agency import GtfsTransitAgency, Arrival
+from gtfs_transit_agency import GtfsTransitAgency
 from google.transit import gtfs_realtime_pb2
 from chip_ctrl import LP5018
 import time
@@ -68,73 +68,89 @@ if __name__ == "__main__":
     agencies = BayTransitAgency.agencies()
     print(agencies)
     muni = MuniTransitAgency()
-    muni._update_realtime_feed()
+    soon_stops = muni.stops("J", 60)
+    for trip_ids, stop_times in soon_stops.items():
+        print(f"Trip ID: {trip_ids}")
+        for stop in stop_times:
+            print(f"  Stop: {stop.stop_id}, Arrival: {stop.arrival_time}, Departure: {stop.departure_time}")
+            print(f"    Time to arrival (s): {stop.time_to_arrival_seconds(muni.agency_metadata.current_time_in_timezone())}")
+            print(f"    Time to departure (s): {stop.time_to_departure_seconds(muni.agency_metadata.current_time_in_timezone())}")
+    
+    lp5018.enabled = False
     # Hack: From real-time feed, check if there is a J line train within 5 minutes of stop_id 16217 ("Right Of Way/21st St")
     # Pulse LED if arrival is within 2 minutes
-    cnt = 0
-    while True:
-        j_stops = muni.HACK_j_stops
-        print("J Line stops within 15 minutes of Right Of Way/21st St:")
-        for stop in j_stops:
-            print(f"Trip ID: {stop.trip_id}, Arrival: {stop.arrival_time}, Departure: {stop.departure_time}")
+    # cnt = 0
+    # while True:
+    #     j_stops = muni.HACK_j_stops
+    #     print("J Line stops within 30 minutes of Right Of Way/21st St:")
+    #     smallest_delta = None
+    #     for stop in j_stops:
+    #         print(f"Trip ID: {stop.trip_id}, Arrival: {stop.arrival_time}, Departure: {stop.departure_time}")
 
-            arrival_parts = list(map(int, stop.arrival_time.split(":")))
-            # Use America/Los_Angeles timezone in datetime.now()
-            now = datetime.now(ZoneInfo("America/Los_Angeles"))
-            arrival_dt = now.replace(hour=arrival_parts[0], minute=arrival_parts[1], second=arrival_parts[2])
-            delta = (arrival_dt - now).total_seconds()
-            if 600 <= delta <= 900:
-                print("  Arrival within 15 minutes, turn on LED on output 12")
-                # Set Output 12 to quarter brightness
-                lp5018.set_brightness(12, 64)
-                lp5018.set_brightness(13, 0)
-                lp5018.set_brightness(14, 0)
-                lp5018.set_brightness(15, 0)
-                lp5018.set_brightness(16, 0)
-            elif 300 <= delta <= 600:
-                print("  Arrival within 10 minutes, turn on LED on output 13")
-                # Set Output 13 to quarter brightness
-                lp5018.set_brightness(12, 0)
-                lp5018.set_brightness(13, 64)
-                lp5018.set_brightness(14, 0)
-                lp5018.set_brightness(15, 0)
-                lp5018.set_brightness(16, 0)
-            elif 120 <= delta <= 300:
-                print("  Arrival within 5 minutes, turn on LED on output 14")
-                # Set Output 14 to quarter brightness
-                lp5018.set_brightness(12, 0)
-                lp5018.set_brightness(13, 0)
-                lp5018.set_brightness(14, 64)
-                lp5018.set_brightness(15, 0)
-                lp5018.set_brightness(16, 0)
-            elif 30 <= delta <= 120:
-                print("  Arrival within 2 minutes, turn on LED on output 15")
-                # Set Output 15 to quarter brightness
-                lp5018.set_brightness(12, 0)
-                lp5018.set_brightness(13, 0)
-                lp5018.set_brightness(15, 64)
-                lp5018.set_brightness(14, 0)
-                lp5018.set_brightness(16, 0)
-            elif 0 <= delta < 30:
-                print("  Arrival within 30 seconds, turn all LEDs on")
-                # Set Output 16 to quarter brightness
-                lp5018.set_brightness(12, 64)
-                lp5018.set_brightness(13, 64)
-                lp5018.set_brightness(16, 64)
-                lp5018.set_brightness(14, 64)
-                lp5018.set_brightness(15, 64)
-            else:
-                print("  Arrival more than 10 minutes away, turn LEDs off")
-                lp5018.set_brightness(12, 0)
-                lp5018.set_brightness(13, 0)
-                lp5018.set_brightness(14, 0)
-                lp5018.set_brightness(15, 0)
-                lp5018.set_brightness(16, 0)
+    #         arrival_parts = list(map(int, stop.arrival_time.split(":")))
+    #         # Use America/Los_Angeles timezone in datetime.now()
+    #         now = datetime.now(ZoneInfo("America/Los_Angeles"))
+    #         arrival_dt = now.replace(hour=arrival_parts[0], minute=arrival_parts[1], second=arrival_parts[2])
+    #         delta = (arrival_dt - now).total_seconds()
+    #         if smallest_delta is None or abs(delta) < abs(smallest_delta):
+    #             smallest_delta = delta
+            
+    #         # Skip if not smallest delta
+    #         if abs(delta) != abs(smallest_delta):
+    #             continue
+
+    #         if 600 <= delta <= 900:
+    #             print("  Arrival within 15 minutes, turn on LED on output 12")
+    #             # Set Output 12 to quarter brightness
+    #             lp5018.set_brightness(12, 64)
+    #             lp5018.set_brightness(13, 0)
+    #             lp5018.set_brightness(14, 0)
+    #             lp5018.set_brightness(15, 0)
+    #             lp5018.set_brightness(16, 0)
+    #         elif 300 <= delta <= 600:
+    #             print("  Arrival within 10 minutes, turn on LED on output 13")
+    #             # Set Output 13 to quarter brightness
+    #             lp5018.set_brightness(12, 0)
+    #             lp5018.set_brightness(13, 64)
+    #             lp5018.set_brightness(14, 0)
+    #             lp5018.set_brightness(15, 0)
+    #             lp5018.set_brightness(16, 0)
+    #         elif 120 <= delta <= 300:
+    #             print("  Arrival within 5 minutes, turn on LED on output 14")
+    #             # Set Output 14 to quarter brightness
+    #             lp5018.set_brightness(12, 0)
+    #             lp5018.set_brightness(13, 0)
+    #             lp5018.set_brightness(14, 64)
+    #             lp5018.set_brightness(15, 0)
+    #             lp5018.set_brightness(16, 0)
+    #         elif 30 <= delta <= 120:
+    #             print("  Arrival within 2 minutes, turn on LED on output 15")
+    #             # Set Output 15 to quarter brightness
+    #             lp5018.set_brightness(12, 0)
+    #             lp5018.set_brightness(13, 0)
+    #             lp5018.set_brightness(15, 64)
+    #             lp5018.set_brightness(14, 0)
+    #             lp5018.set_brightness(16, 0)
+    #         elif 0 <= delta < 30:
+    #             print("  Arrival within 30 seconds, turn all LEDs on")
+    #             # Set Output 16 to quarter brightness
+    #             lp5018.set_brightness(12, 64)
+    #             lp5018.set_brightness(13, 64)
+    #             lp5018.set_brightness(16, 64)
+    #             lp5018.set_brightness(14, 64)
+    #             lp5018.set_brightness(15, 64)
+    #         else:
+    #             print("  Arrival more than 10 minutes away, turn LEDs off")
+    #             lp5018.set_brightness(12, 0)
+    #             lp5018.set_brightness(13, 0)
+    #             lp5018.set_brightness(14, 0)
+    #             lp5018.set_brightness(15, 0)
+    #             lp5018.set_brightness(16, 0)
         
-        print("\n--------------------------------\n")
-        time.sleep(2)
-        cnt += 1
-        # only update realtime feed every 70 seconds
-        if cnt % 35 == 0:
-            print("Updating real-time feed...")
-            muni._update_realtime_feed()
+    #     print("\n--------------------------------\n")
+    #     time.sleep(2)
+    #     cnt += 1
+    #     # only update realtime feed every 70 seconds
+    #     if cnt % 35 == 0:
+    #         print("Updating real-time feed...")
+    #         muni._update_realtime_feed()

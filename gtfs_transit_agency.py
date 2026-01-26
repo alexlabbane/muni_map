@@ -13,12 +13,6 @@ from google.transit import gtfs_realtime_pb2
 
 from gtfs_types import AgencyMetadata, FeedMetadata, Stop, Route, Trip, StopTime
 
-@dataclass
-class Arrival:
-    station_id: str
-    arrival_time: time.struct_time
-    is_at_station: bool
-
 """Abstract base class for GTFS transit lines. Currently supports only bay area transit via 511.org, but can be refactored to support other regions."""
 class GtfsTransitAgency(ABC):
     
@@ -26,21 +20,41 @@ class GtfsTransitAgency(ABC):
         # Initialize data structures to hold static GTFS data for the agency
         self.agency_metadata: AgencyMetadata = None
         self.feed_metadata: FeedMetadata = None
-        self.stops : Dict[str, Stop] = {}
-        self.routes: Dict[str, Route] = {}
-        self.trips: Dict[str, Trip] = {}
+        self._stops : Dict[str, Stop] = {}
+        self._routes: Dict[str, Route] = {}
+        self._trips: Dict[str, Trip] = {}
         # For now, don't use calendar.txt and calendar_dates.txt
 
+        self._last_realtime_update: float = 0.0
         self._read_datafeed()
         self._update_realtime_feed()
 
     # Public Interface
 
-    def estimated_arrivals(self) -> List[Arrival]:
-        pass
+    # def stops(self) -> Dict[str, List[StopTime]]:
+    #     pass
 
-    def estimated_arrivals(self, station_id: str) -> List[Arrival]:
-        pass
+    def stops(self, route_id: str, time_threshold_s: int = 3600) -> Dict[str, List[StopTime]]:
+        # First, update realtime datafeed if it's been >60 seconds since last update
+        self._update_realtime_feed()
+
+        # Get the estimated arrivals and departures for all stops on the given route
+        stops = {}
+        for trip in self._routes[route_id].trips.values():
+            if trip.trip_id not in stops:
+                stops[trip.trip_id] = []
+
+            for stop_time in trip.stops.values():
+                # Check if arrival_time or departure time is within time_threshold_s of now
+                if ( stop_time.arrival_real_time and 0 <= stop_time.time_to_arrival_seconds(self.agency_metadata.current_time_in_timezone()) <= time_threshold_s ) or ( stop_time.departure_real_time and 0 <= stop_time.time_to_departure_seconds(self.agency_metadata.current_time_in_timezone()) <= time_threshold_s ):
+                    stops[trip.trip_id].append(stop_time)
+
+
+
+        return stops
+
+    # def stops(self, stop_id: str) -> Dict[str, List[StopTime]]:
+    #     pass
 
     def update_datafeed(self):
         """GTFS datafeed download allows the user to download a zip file containing GTFS dataset for the
@@ -126,10 +140,16 @@ class GtfsTransitAgency(ABC):
 
     def _update_realtime_feed(self):
         """Fetch GTFS-realtime data from API. For now only get from tripupdates endpoint."""
+        # Only update every 60 seconds
+        if time.time() - self._last_realtime_update < 60:
+            return
+
+        print("Fetching GTFS-realtime feed...")
         res = self._send_api_request(
             request_url=f"{self.BASE_URL()}tripupdates",
             params={"api_key": self.API_KEY(), "agency": self.agency}
         )
+        self._last_realtime_update = time.time()
 
         # Parse GTFS-realtime feed
         try:
@@ -144,46 +164,99 @@ class GtfsTransitAgency(ABC):
             print("Agency metadata not loaded; cannot process real-time feed timestamps correctly.")
             raise ValueError("Agency metadata not loaded")
 
+        # Store the updated information for all lines
+
+
         tz = ZoneInfo(self.agency_metadata.timezone)
-        self.HACK_j_stops: List[StopTime] = []
+        # self.HACK_j_stops: List[StopTime] = []
         for entity in feed.entity:
             if entity.HasField('trip_update'):
                 trip_update = entity.trip_update
+                
+                # Store the updated stop times for all lines
+                if trip_update.trip.route_id not in self._routes:
+                    print("Warning: trip_update with unknown route_id:", trip_update.trip.route_id)
+                    continue  # Unknown route_id
+                
+                if trip_update.trip.trip_id not in self._trips:
+                    print("Warning: trip_update with unknown trip_id:", trip_update.trip.trip_id)
+                    continue  # Unknown trip_id
+
+                for stop_update in trip_update.stop_time_update:
+                    # if the trip update is for route id 'J', print the stop time updates
+                    if trip_update.trip.route_id == "J":
+                        arrival_str = "N/A"
+                        departure_str = "N/A"
+                        if stop_update.HasField('arrival'):
+                            arrival_dt = datetime.fromtimestamp(stop_update.arrival.time, tz)
+                            arrival_str = arrival_dt.strftime("%H:%M:%S")
+                        if stop_update.HasField('departure'):
+                            departure_dt = datetime.fromtimestamp(stop_update.departure.time, tz)
+                            departure_str = departure_dt.strftime("%H:%M:%S")
+                        print(f"Trip ID: {trip_update.trip.trip_id}, Stop ID: {stop_update.stop_id}, Arrival: {arrival_str}, Departure: {departure_str}")
+
+                    # Update the corresponding Trip's StopTime entries
+                    trip_id = trip_update.trip.trip_id
+                    trip = self._trips[trip_id]
+                    stop_sequence = stop_update.stop_sequence
+                    if stop_sequence not in trip.stops:
+                        print("Warning: stop_update with unknown stop_sequence:", stop_sequence, "for trip_id:", trip_id)
+                        continue  # Unknown stop_sequence
+
+                    stop_time = trip.stops[stop_sequence]
+                    # Update arrival and departure times if present
+                    if stop_update.HasField('arrival'):
+                        arrival_timestamp = stop_update.arrival.time
+                        arrival_dt = datetime.fromtimestamp(arrival_timestamp, tz)
+                        # if stop_time.arrival_time != arrival_dt.strftime("%H:%M:%S"):
+                        #     print(f"Old arrival time: {stop_time.arrival_time}, New arrival time: {arrival_dt.strftime('%H:%M:%S')}")
+                        stop_time.arrival_time = arrival_dt.strftime("%H:%M:%S")
+                        stop_time.arrival_real_time = True
+                    if stop_update.HasField('departure'):
+                        departure_timestamp = stop_update.departure.time
+                        departure_dt = datetime.fromtimestamp(departure_timestamp, tz)
+                        
+                        # if stop_time.departure_time != departure_dt.strftime("%H:%M:%S"):
+                        #     print(f"Old departure time: {stop_time.departure_time}, New departure time: {departure_dt.strftime('%H:%M:%S')}")
+                        stop_time.departure_time = departure_dt.strftime("%H:%M:%S")
+                        stop_time.departure_real_time = True
+                    
+                
                 # Prototype: Print the stop_time_updates only for the J line. Times are in the timezone specified by agency.txt
-                route_id = None
-                if trip_update.trip.route_id in self.routes:
-                    route_id = self.routes[trip_update.trip.route_id].name
-                if route_id == "J":
-                    #print(f"Trip ID: {trip_update.trip.trip_id}, Route ID: {route_id}")
-                    for stu in trip_update.stop_time_update:
-                        arrival = stu.arrival.time
-                        departure = stu.departure.time
-                        stop_id = stu.stop_id
+                # route_id = None
+                # if trip_update.trip.route_id in self.routes:
+                #     route_id = self.routes[trip_update.trip.route_id].name
+                # if route_id == "91": # 91 is N OWL
+                #     #print(f"Trip ID: {trip_update.trip.trip_id}, Route ID: {route_id}")
+                #     for stu in trip_update.stop_time_update:
+                #         arrival = stu.arrival.time
+                #         departure = stu.departure.time
+                #         stop_id = stu.stop_id
 
-                        arrival_str = (
-                            datetime.fromtimestamp(arrival, tz).strftime("%H:%M:%S")
-                            if arrival else "N/A"
-                        )
+                #         arrival_str = (
+                #             datetime.fromtimestamp(arrival, tz).strftime("%H:%M:%S")
+                #             if arrival else "N/A"
+                #         )
 
-                        departure_str = (
-                            datetime.fromtimestamp(departure, tz).strftime("%H:%M:%S")
-                            if departure else "N/A"
-                        )
-                        #print(f"  Stop ID: {stop_id}, Arrival: {arrival_str}, Departure: {departure_str}")
-                        # If the J stop is within 30 seconds of now and is stop ID 16217, save to HACK_j_stops as a StopTime object
-                        if stop_id == "16217":
-                            now_ts = int(datetime.now(tz).timestamp())
-                            if arrival and abs(arrival - now_ts) <= 900:
-                                stop_time = StopTime(
-                                    trip_id=trip_update.trip.trip_id,
-                                    arrival_time=arrival_str,
-                                    departure_time=departure_str,
-                                    stop_id=stop_id,
-                                    stop_sequence=stu.stop_sequence if stu.HasField('stop_sequence') else -1  # Unknown
-                                )
-                                self.HACK_j_stops.append(stop_time)
-                                print("Found one close to Right Of Way/21st St!")
-                                print(f"  Trip ID: {trip_update.trip.trip_id} Stop ID: {stop_id}, Arrival: {arrival_str}, Departure: {departure_str}")
+                #         departure_str = (
+                #             datetime.fromtimestamp(departure, tz).strftime("%H:%M:%S")
+                #             if departure else "N/A"
+                #         )
+                #         #print(f"  Stop ID: {stop_id}, Arrival: {arrival_str}, Departure: {departure_str}")
+                #         # If the J stop is within 30 seconds of now and is stop ID 16217 (Right of Way/21st), 17125 (West Portal Ave & 14th Ave), etc. save to HACK_j_stops as a StopTime object
+                #         if stop_id == "17125":
+                #             now_ts = int(datetime.now(tz).timestamp())
+                #             if arrival and abs(arrival - now_ts) <= 3600:  # within 60 minutes
+                #                 stop_time = StopTime(
+                #                     trip_id=trip_update.trip.trip_id,
+                #                     arrival_time=arrival_str,
+                #                     departure_time=departure_str,
+                #                     stop_id=stop_id,
+                #                     stop_sequence=stu.stop_sequence if stu.HasField('stop_sequence') else -1  # Unknown
+                #                 )
+                #                 self.HACK_j_stops.append(stop_time)
+                #                 print("Found one close to Right Of Way/21st St!")
+                #                 print(f"  Trip ID: {trip_update.trip.trip_id} Stop ID: {stop_id}, Arrival: {arrival_str}, Departure: {departure_str}")
             else:
                 # Handle other entity types if necessary
                 print("Unexpected entity type in GTFS-realtime feed")
@@ -254,8 +327,8 @@ class GtfsTransitAgency(ABC):
                     latitude=float(fields[3]),
                     longitude=float(fields[4])
                 )
-                self.stops[stop.stop_id] = stop
-            print(f"Loaded {len(self.stops)} stops.")
+                self._stops[stop.stop_id] = stop
+            print(f"Loaded {len(self._stops)} stops.")
 
         # ---------- Parse routes.txt ----------
         with open(os.path.join(datafeed_path, "routes.txt"), "r") as f:
@@ -265,10 +338,11 @@ class GtfsTransitAgency(ABC):
                 route = Route(
                     route_id=fields[0],
                     agency_id=fields[1],
-                    name=fields[2]
+                    name=fields[2],
+                    trips={}
                 )
-                self.routes[route.route_id] = route
-            print(f"Loaded {len(self.routes)} routes.")
+                self._routes[route.route_id] = route
+            print(f"Loaded {len(self._routes)} routes.")
 
         # ---------- Parse trips.txt ----------
         with open(os.path.join(datafeed_path, "trips.txt"), "r") as f:
@@ -283,8 +357,9 @@ class GtfsTransitAgency(ABC):
                     direction_id=int(fields[4]),
                     stops={}
                 )
-                self.trips[trip.trip_id] = trip
-            print(f"Loaded {len(self.trips)} trips.")
+                self._trips[trip.trip_id] = trip
+                self._routes[trip.route_id].trips[trip.trip_id] = trip  # Link trip to route
+            print(f"Loaded {len(self._trips)} trips.")
         # ---------- Parse stop_times.txt ----------
         with open(os.path.join(datafeed_path, "stop_times.txt"), "r") as f:
             next(f)  # Skip header
@@ -297,8 +372,8 @@ class GtfsTransitAgency(ABC):
                     stop_id=fields[3],
                     stop_sequence=int(fields[4])
                 )
-                if stop_time.trip_id in self.trips:
-                    self.trips[stop_time.trip_id].stops[stop_time.stop_sequence] = stop_time
+                if stop_time.trip_id in self._trips:
+                    self._trips[stop_time.trip_id].stops[stop_time.stop_sequence] = stop_time
                 else:
                     # TODO: Log warning about stop_time for unknown trip_id
                     pass
@@ -307,8 +382,8 @@ class GtfsTransitAgency(ABC):
 
         # Print a summary of trips (+ route name) with their # of stop times
         cnt = 0
-        for trip_id, trip in self.trips.items():
-            route_name = self.routes[trip.route_id].name if trip.route_id in self.routes else "Unknown Route"
+        for trip_id, trip in self._trips.items():
+            route_name = self._routes[trip.route_id].name if trip.route_id in self._routes else "Unknown Route"
             if route_name == "J":
                 cnt += 1
                 # print(f"Trip ID: {trip_id}, Route Name: {route_name}, Number of Stop Times: {len(trip.stops)}")

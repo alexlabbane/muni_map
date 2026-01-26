@@ -1,5 +1,8 @@
 import smbus2
+import threading
 import time
+
+from typing import List
 
 class LP5018:
     """Class to interface with the LP5018 LED driver via I2C."""
@@ -94,22 +97,46 @@ class LP5018:
         self.i2c_address = i2c_address
 
         # Set default config
+        self.pulsing_outputs = set()
         self.reset()
+
+        # For pulsing outputs
+        self.enabled = True
+        self.pulse_thread = threading.Thread(target=self._pulse_thread_fn, args=(self,))
+        self.pulse_thread.start()
+
+    # def __del__(self):
+    #     """Cleanup on deletion."""
+    #     self.enabled = False
+    #     if self.pulse_thread and self.pulse_thread.is_alive():
+    #         self.pulse_thread.join()
+    #     self.bus.close()
 
     def reset(self):
         """Reset the LP5018 to default configuration."""
+        self.pulsing_outputs.clear()
         for reg, value in self.DEFAULT_CONFIG.items():
             self._write_register(reg, value)
 
     def set_brightness(self, output: int, brightness: int):
         """Set the brightness of a specific output (0-23)."""
+        self.pulsing_outputs.discard(output)
+        self._set_brightness(output, brightness)
+
+    def set_pulsed_outputs(self, outputs: List[int]):
+        """Set multiple outputs to pulse."""
+        for output in outputs:
+            if not (0 <= output <= 23):
+                raise ValueError("Output must be between 0 and 23.")
+        
+        self.pulsing_outputs = set(outputs)
+
+    def pulse_output(self, output: int):
+        """Start pulsing a specific output (0-23)."""
         if not (0 <= output <= 23):
             raise ValueError("Output must be between 0 and 23.")
-        if not (0 <= brightness <= 255):
-            raise ValueError("Brightness must be between 0 and 255.")
 
-        reg = self.REG_OUT0_COLOR + output
-        self._write_register(reg, brightness)
+        self.pulsing_outputs.add(output)
 
     # Private methods
     def _read_register(self, register):
@@ -119,6 +146,34 @@ class LP5018:
     def _write_register(self, register, value):
         """Write a byte to a specific register."""
         self.bus.write_byte_data(self.i2c_address, register, value)
+
+    def _set_brightness(self, output: int, brightness: int):
+        """Set the brightness of a specific output (0-23)."""
+        if not (0 <= output <= 23):
+            raise ValueError("Output must be between 0 and 23.")
+        if not (0 <= brightness <= 255):
+            raise ValueError("Brightness must be between 0 and 255.")
+
+        reg = self.REG_OUT0_COLOR + output
+        self._write_register(reg, brightness)
+
+    @staticmethod
+    def _pulse_thread_fn(chip: 'LP5018'):
+        """Smoothly pulse the LEDs in chip.pulsing_outputs"""
+        while chip.enabled:
+            if len(chip.pulsing_outputs) == 0:
+                # Nothing to pulse, just wait
+                # print("No outputs to pulse, sleeping...")
+                time.sleep(0.5)
+                continue
+
+            for step in range(256):
+                pulsing_outputs = list(chip.pulsing_outputs)
+                for output in pulsing_outputs:
+                    brightness = abs(255 - step * 2) if step < 128 else abs(step * 2 - 255)
+                    # print(f"Setting output {output} to brightness {brightness}")
+                    chip._set_brightness(output, brightness)
+                time.sleep(0.01)
 
 if __name__ == "__main__":
     lp5018 = LP5018()
@@ -133,13 +188,14 @@ if __name__ == "__main__":
     # e.g., when LED 12 is at max brightness, LED 13 is at half brightness, LED 14 is at min brightness, etc.
     print("Pulsing outputs 12-17. Press Ctrl+C to stop.")
     try:
-        while True:
-            for step in range(256):
-                for i, output in enumerate(range(12, 18)):
-                    # Calculate brightness with phase offset
-                    phase = (step + (i * 42)) % 256
-                    brightness = abs(255 - phase * 2) if phase < 128 else abs(phase * 2 - 255)
-                    lp5018.set_brightness(output, brightness)
-                time.sleep(0.01)
+        lp5018.set_pulsed_outputs([12, 13, 14, 15, 16, 17])
+        # while True:
+        #     for step in range(256):
+        #         for i, output in enumerate(range(12, 18)):
+        #             # Calculate brightness with phase offset
+        #             phase = (step + (i * 42)) % 256
+        #             brightness = abs(255 - phase * 2) if phase < 128 else abs(phase * 2 - 255)
+        #             lp5018.set_brightness(output, brightness // 4) # Quarter brightness
+        #         time.sleep(0.01)
     except KeyboardInterrupt:
         print("Stopping pulsing.")
