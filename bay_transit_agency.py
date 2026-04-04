@@ -12,7 +12,8 @@ from zoneinfo import ZoneInfo
 class BayTransitAgency(GtfsTransitAgency, ABC):
     API_KEY="9204d66d-0a54-4767-b0bd-05146057d4aa"
     BASE_URL="http://api.511.org/transit/"
-    
+    REQUEST_NUM = 0
+
     def __init__(self):
         super().__init__()
 
@@ -45,7 +46,12 @@ class BayTransitAgency(GtfsTransitAgency, ABC):
     
     @classmethod
     def API_KEY(cls) -> str:
-        #return "9204d66d-0a54-4767-b0bd-05146057d4aa"
+        cls.REQUEST_NUM += 1
+        if cls.REQUEST_NUM % 2 == 0:
+            print("Using alternate API key")
+            return "9204d66d-0a54-4767-b0bd-05146057d4aa"
+
+        print("Using primary API key")
         return "adc7ae59-732f-4df2-b4d3-58a9cbd9cc2f"
 
 class MuniTransitAgency(BayTransitAgency):

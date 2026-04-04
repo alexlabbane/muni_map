@@ -179,23 +179,29 @@ if __name__ == "__main__":
     lp5018 = LP5018()
     time.sleep(2)
 
-    # Set Output 12-17 to full brightness
-    for output in range(12, 18):
-        lp5018.set_brightness(output, 255)
+    # Turn on each LED in sequence
+    for output in range(24):
+        print(f"Setting output {output} to 32 brightness")
+        lp5018.set_brightness(output, 32)
+        time.sleep(1)
 
-    time.sleep(2)
-    # Smoothly pulse outputs 12-17 indefinitely; offset each LED evenly by 0.5 seconds
-    # e.g., when LED 12 is at max brightness, LED 13 is at half brightness, LED 14 is at min brightness, etc.
-    print("Pulsing outputs 12-17. Press Ctrl+C to stop.")
-    try:
-        lp5018.set_pulsed_outputs([12, 13, 14, 15, 16, 17])
-        # while True:
-        #     for step in range(256):
-        #         for i, output in enumerate(range(12, 18)):
-        #             # Calculate brightness with phase offset
-        #             phase = (step + (i * 42)) % 256
-        #             brightness = abs(255 - phase * 2) if phase < 128 else abs(phase * 2 - 255)
-        #             lp5018.set_brightness(output, brightness // 4) # Quarter brightness
-        #         time.sleep(0.01)
-    except KeyboardInterrupt:
-        print("Stopping pulsing.")
+    # # Set Output 12-17 to full brightness
+    # for output in range(12, 18):
+    #     lp5018.set_brightness(output, 255)
+
+    # time.sleep(2)
+    # # Smoothly pulse outputs 12-17 indefinitely; offset each LED evenly by 0.5 seconds
+    # # e.g., when LED 12 is at max brightness, LED 13 is at half brightness, LED 14 is at min brightness, etc.
+    # print("Pulsing outputs 12-17. Press Ctrl+C to stop.")
+    # try:
+    #     lp5018.set_pulsed_outputs([12, 13, 14, 15, 16, 17])
+    #     # while True:
+    #     #     for step in range(256):
+    #     #         for i, output in enumerate(range(12, 18)):
+    #     #             # Calculate brightness with phase offset
+    #     #             phase = (step + (i * 42)) % 256
+    #     #             brightness = abs(255 - phase * 2) if phase < 128 else abs(phase * 2 - 255)
+    #     #             lp5018.set_brightness(output, brightness // 4) # Quarter brightness
+    #     #         time.sleep(0.01)
+    # except KeyboardInterrupt:
+    #     print("Stopping pulsing.")

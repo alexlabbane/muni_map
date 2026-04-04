@@ -140,8 +140,8 @@ class GtfsTransitAgency(ABC):
 
     def _update_realtime_feed(self):
         """Fetch GTFS-realtime data from API. For now only get from tripupdates endpoint."""
-        # Only update every 60 seconds
-        if time.time() - self._last_realtime_update < 60:
+        # Only update every 30 seconds
+        if time.time() - self._last_realtime_update < 30:
             return
 
         print("Fetching GTFS-realtime feed...")

@@ -22,13 +22,13 @@ class LineOrchestrator:
 
     def update_leds(self):
         # Fetch real-time updates
-        stops = self.agency.stops(self.route_id, 60)
+        stops = self.agency.stops(self.route_id, 300)
 
         ### Default rules
         ### For each trip, if vehicle has left previous stop & is within 60 seconds of arrival, pulse the LED
         ### If the vehicle is <30 seconds away, keep the LED solid on
         ### Each trip will only have one LED on at a time. If multiple stops are within 30 seconds, light up closest.
-        pulsing_threshold = 60  # seconds
+        pulsing_threshold = 300  # seconds
         solid_on_threshold = 30  # seconds
 
         pulsing = set()
@@ -80,11 +80,24 @@ if __name__ == "__main__":
     chip = LP5018()
     muni = MuniTransitAgency()
     controlled_stops = {
-        "17217": ControlledStop(stop_id="17217", led_index=12),  # Embarcadero
-        "18059": ControlledStop(stop_id="18059", led_index=13),  # Church & Market
-        "16216": ControlledStop(stop_id="16216", led_index=14),  # Right Of Way/21st St
-        "14004": ControlledStop(stop_id="14004", led_index=15),  # Church St & Day St
-        "15418": ControlledStop(stop_id="15418", led_index=16),  # Balboa Park BART
+        "17217": ControlledStop(stop_id="17217", led_index=10),  # Embarcadero
+        "16994": ControlledStop(stop_id="16994", led_index=9),  # Montgomery
+        "16995": ControlledStop(stop_id="16995", led_index=8),  # Powell
+        "16997": ControlledStop(stop_id="16997", led_index=7),  # Civic Center
+        "16996": ControlledStop(stop_id="16996", led_index=5),  # Van Ness
+        "18059": ControlledStop(stop_id="18059", led_index=4),  # Church St & Market St
+        "13984": ControlledStop(stop_id="13984", led_index=3),  # Church St & 16th St
+        "13987": ControlledStop(stop_id="13987", led_index=1),  # Church St & 18th St
+        "16214": ControlledStop(stop_id="16214", led_index=0),  # Right Of Way/20th St
+        "16221": ControlledStop(stop_id="16221", led_index=12),  # Right Of Way/Liberty St
+        "16216": ControlledStop(stop_id="16216", led_index=13),  # Right Of Way/21st St
+        "16218": ControlledStop(stop_id="16218", led_index=14),  # Church St & 22nd St
+        "13995": ControlledStop(stop_id="13995", led_index=15),  # Church St & 24th St
+        "18156": ControlledStop(stop_id="18156", led_index=17),  # Church St & 26th St
+        "18158": ControlledStop(stop_id="18158", led_index=19),  # Church St & 28th St
+        "14004": ControlledStop(stop_id="14004", led_index=20),  # Church St & Day St
+        "13538": ControlledStop(stop_id="13538", led_index=22),  # 30th St & Dolores St
+        "16280": ControlledStop(stop_id="16280", led_index=21),  # San Jose Ave & Randall St
     }
 
     orchestrator = LineOrchestrator(agency=muni, route_id="J", controlled_stops=controlled_stops)
