@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from bay_transit_agency import MuniTransitAgency
 from gtfs_transit_agency import GtfsTransitAgency
-from chip_ctrl import LP5018
+from chip_ctrl import create_led_controller
 
 from gtfs_types import AgencyMetadata, FeedMetadata, Stop, Route, Trip, StopTime
 from typing import Dict
@@ -14,11 +14,43 @@ class ControlledStop:
     led_index: int
 
 class LineOrchestrator:
-    def __init__(self, agency: GtfsTransitAgency, route_id: str, controlled_stops: Dict[str, ControlledStop]):
+    def __init__(self, agency: GtfsTransitAgency, route_id: str, controlled_stops: Dict[str, ControlledStop], use_mock_led=False):
         self.agency = agency
         self.route_id = route_id
         self.controlled_stops = controlled_stops
-        self.led_controller = LP5018()
+        # Create stop names mapping for visualization
+        # For demonstration, we'll use a more descriptive mapping
+        # In a real implementation, this would be retrieved from GTFS data
+        stop_names = {
+            stop.led_index: stop.stop_id for stop in controlled_stops.values()
+        }
+        # Override with more descriptive names where available
+        descriptive_names = {
+            0: "20th St Right Of Way",
+            1: "Church St & 18th St",
+            3: "Church St & 16th St",
+            4: "Church St & Market St",
+            5: "Van Ness",
+            7: "Civic Center",
+            8: "Powell",
+            9: "Montgomery",
+            10: "Embarcadero",
+            12: "Liberty St",
+            13: "21st St",
+            14: "22nd St",
+            15: "24th St",
+            17: "26th St",
+            19: "28th St",
+            20: "Day St",
+            21: "Randall St",
+            22: "30th St & Dolores St"
+        }
+        # Merge with the existing names to improve display
+        for led_index, name in descriptive_names.items():
+            if led_index in stop_names:
+                stop_names[led_index] = name
+
+        self.led_controller = create_led_controller(use_mock=use_mock_led, stop_names=stop_names)
 
     def update_leds(self):
         # Fetch real-time updates
@@ -45,14 +77,14 @@ class LineOrchestrator:
             min_delta = int(1e9)
             for stop_time in stop_times:
                 delta = min(
-                    stop_time.time_to_arrival_seconds(self.agency.agency_metadata.current_time_in_timezone()), 
+                    stop_time.time_to_arrival_seconds(self.agency.agency_metadata.current_time_in_timezone()),
                     stop_time.time_to_departure_seconds(self.agency.agency_metadata.current_time_in_timezone()))
 
                 # Update closest stop
                 if 0 <= delta < min_delta:
                     min_delta = delta
                     closest_stop = stop_time
-                
+
             if closest_stop is not None and closest_stop.stop_id in self.controlled_stops:
                 led_index = self.controlled_stops[closest_stop.stop_id].led_index
 
@@ -77,7 +109,14 @@ class LineOrchestrator:
             self.led_controller.set_brightness(led, 64) # Quarter brightness
 
 if __name__ == "__main__":
-    chip = LP5018()
+    # For testing, you can use the mock controller by setting use_mock_led=True
+    use_mock = False
+    if "USE_MOCK_LED" in globals() or "USE_MOCK_LED" in locals():
+        use_mock = True
+    else:
+        import os
+        use_mock = os.environ.get('USE_MOCK_LED', '').lower() in ('1', 'true', 'yes')
+
     muni = MuniTransitAgency()
     controlled_stops = {
         "17217": ControlledStop(stop_id="17217", led_index=10),  # Embarcadero
@@ -100,11 +139,11 @@ if __name__ == "__main__":
         "16280": ControlledStop(stop_id="16280", led_index=21),  # San Jose Ave & Randall St
     }
 
-    orchestrator = LineOrchestrator(agency=muni, route_id="J", controlled_stops=controlled_stops)
+    orchestrator = LineOrchestrator(agency=muni, route_id="J", controlled_stops=controlled_stops, use_mock_led=use_mock)
     try:
         while True:
             orchestrator.update_leds()
             time.sleep(3)  # Update every 3 seconds
     except KeyboardInterrupt:
         print("Stopping orchestrator.")
-        chip.enabled = False
+        # Note: Mock controllers don't have the enabled attribute, so we don't need to set it

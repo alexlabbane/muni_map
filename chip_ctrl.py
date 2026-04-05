@@ -1,8 +1,27 @@
 import smbus2
 import threading
 import time
+import os
 
 from typing import List
+
+# Import LED visualizer for mock mode
+try:
+    from led_visualization import LEDVisualizer
+except ImportError:
+    # If the visualizer isn't available, create a dummy class
+    class LEDVisualizer:
+        def __init__(self, num_leds=24):
+            self.num_leds = num_leds
+            self.led_states = [0] * num_leds
+
+        def update_all_leds(self, led_states):
+            # Dummy implementation
+            pass
+
+        def display(self):
+            # Dummy implementation
+            pass
 
 class LP5018:
     """Class to interface with the LP5018 LED driver via I2C."""
@@ -128,7 +147,7 @@ class LP5018:
         for output in outputs:
             if not (0 <= output <= 23):
                 raise ValueError("Output must be between 0 and 23.")
-        
+
         self.pulsing_outputs = set(outputs)
 
     def pulse_output(self, output: int):
@@ -175,33 +194,129 @@ class LP5018:
                     chip._set_brightness(output, brightness)
                 time.sleep(0.01)
 
+
+class MockLP5018:
+    """Mock class for LP5018 LED driver that simulates hardware behavior without actual I2C communication."""
+
+    def __init__(self, bus_number=1, i2c_address=0x28, stop_names=None):
+        """Initialize the mock LED driver."""
+        self.bus_number = bus_number
+        self.i2c_address = i2c_address
+        self.pulsing_outputs = set()
+        self.led_states = {}
+        self._initialize_led_states()
+
+        # Store stop names mapping if provided
+        self.stop_names = stop_names or {}
+
+        # Create LED visualizer for display
+        self.visualizer = LEDVisualizer()
+
+        # Simulate the LED states in memory
+        print(f"MockLP5018 initialized. Bus: {bus_number}, Address: {i2c_address}")
+
+    def _initialize_led_states(self):
+        """Initialize all LED states to 0 (off)."""
+        for i in range(24):
+            self.led_states[i] = 0
+
+    def reset(self):
+        """Reset the mock LED driver to default configuration."""
+        self.pulsing_outputs.clear()
+        self._initialize_led_states()
+        print("MockLP5018 reset called")
+        # Update visualizer after reset
+        self.visualizer.update_all_leds(self.led_states)
+        self.visualizer.display(self.stop_names)
+
+    def set_brightness(self, output: int, brightness: int):
+        """Set the brightness of a specific output (0-23) - mock version."""
+        if not (0 <= output <= 23):
+            raise ValueError("Output must be between 0 and 23.")
+        if not (0 <= brightness <= 255):
+            raise ValueError("Brightness must be between 0 and 255.")
+
+        self.pulsing_outputs.discard(output)
+        self.led_states[output] = brightness
+        print(f"MockLP5018: Setting output {output} to brightness {brightness}")
+        # Update visualizer with new state
+        self.visualizer.update_led_state(output, brightness)
+        self.visualizer.display(self.stop_names)
+
+    def set_pulsed_outputs(self, outputs: List[int]):
+        """Set multiple outputs to pulse - mock version."""
+        for output in outputs:
+            if not (0 <= output <= 23):
+                raise ValueError("Output must be between 0 and 23.")
+
+        self.pulsing_outputs = set(outputs)
+        print(f"MockLP5018: Setting pulsed outputs to {outputs}")
+        # Update visualizer with current states
+        self.visualizer.update_all_leds(self.led_states)
+        self.visualizer.display(self.stop_names)
+
+    def pulse_output(self, output: int):
+        """Start pulsing a specific output (0-23) - mock version."""
+        if not (0 <= output <= 23):
+            raise ValueError("Output must be between 0 and 23.")
+
+        self.pulsing_outputs.add(output)
+        print(f"MockLP5018: Starting to pulse output {output}")
+        # Update visualizer with current states
+        self.visualizer.update_all_leds(self.led_states)
+        self.visualizer.display(self.stop_names)
+
+    def get_led_state(self, output: int) -> int:
+        """Get the current brightness of a specific LED output."""
+        return self.led_states.get(output, 0)
+
+    def get_all_led_states(self) -> dict:
+        """Get all LED states."""
+        return self.led_states.copy()
+
+    def clear_pulsing_outputs(self):
+        """Clear all pulsing outputs."""
+        self.pulsing_outputs.clear()
+
+
+def create_led_controller(bus_number=1, i2c_address=0x28, use_mock=False, stop_names=None):
+    """
+    Factory function to create either a real or mock LED controller.
+
+    Args:
+        bus_number: I2C bus number
+        i2c_address: I2C address of the device
+        use_mock: If True, return a MockLP5018 instance; otherwise return LP5018 instance
+        stop_names: Dictionary mapping LED indices to stop names for visualization
+
+    Returns:
+        LP5018 or MockLP5018 instance
+    """
+    # Check environment variable for mock mode
+    if use_mock or os.environ.get('USE_MOCK_LED', '').lower() in ('1', 'true', 'yes'):
+        return MockLP5018(bus_number, i2c_address, stop_names)
+    else:
+        return LP5018(bus_number, i2c_address)
+
+
 if __name__ == "__main__":
-    lp5018 = LP5018()
-    time.sleep(2)
+    # Test the mock functionality
+    print("Testing LED controller creation...")
 
-    # Turn on each LED in sequence
-    for output in range(24):
-        print(f"Setting output {output} to 32 brightness")
-        lp5018.set_brightness(output, 32)
-        time.sleep(1)
+    # Test with mock
+    mock_controller = create_led_controller(use_mock=True)
+    print(f"Created controller type: {type(mock_controller).__name__}")
 
-    # # Set Output 12-17 to full brightness
-    # for output in range(12, 18):
-    #     lp5018.set_brightness(output, 255)
+    # Test setting brightness
+    mock_controller.set_brightness(5, 128)
+    mock_controller.set_brightness(10, 200)
+    mock_controller.set_pulsed_outputs([1, 2, 3])
 
-    # time.sleep(2)
-    # # Smoothly pulse outputs 12-17 indefinitely; offset each LED evenly by 0.5 seconds
-    # # e.g., when LED 12 is at max brightness, LED 13 is at half brightness, LED 14 is at min brightness, etc.
-    # print("Pulsing outputs 12-17. Press Ctrl+C to stop.")
-    # try:
-    #     lp5018.set_pulsed_outputs([12, 13, 14, 15, 16, 17])
-    #     # while True:
-    #     #     for step in range(256):
-    #     #         for i, output in enumerate(range(12, 18)):
-    #     #             # Calculate brightness with phase offset
-    #     #             phase = (step + (i * 42)) % 256
-    #     #             brightness = abs(255 - phase * 2) if phase < 128 else abs(phase * 2 - 255)
-    #     #             lp5018.set_brightness(output, brightness // 4) # Quarter brightness
-    #     #         time.sleep(0.01)
-    # except KeyboardInterrupt:
-    #     print("Stopping pulsing.")
+    # Test with real
+    try:
+        real_controller = create_led_controller(use_mock=False)
+        print(f"Created controller type: {type(real_controller).__name__}")
+    except Exception as e:
+        print(f"Could not create real controller (expected in mock test): {e}")
+
+    print("Test completed.")
