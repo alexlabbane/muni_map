@@ -17,7 +17,7 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = 'muni-map-led-visualizer-secret-key'
 app.config['JSON_AS_ASCII'] = False
 
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Global LED controller instance
 led_controller = None
@@ -733,7 +733,7 @@ def visualizer():
 @socketio.on('connect')
 def handle_connect():
     """Handle client connection."""
-    print('Client connected')
+    print(f'>>> Client connected (sid={request.sid})')
     # Join the room so broadcasts reach this client
     join_room('led_visualizer')
     # Send current client count to the new client
@@ -744,7 +744,7 @@ def handle_connect():
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection."""
-    print('Client disconnected')
+    print(f'>>> Client disconnected (sid={request.sid})')
     # Leave the room on disconnect
     leave_room('led_visualizer')
 
