@@ -63,10 +63,13 @@ def led_visualizer_loop():
             led_states = led_controller.get_all_led_states()
             # Get pulsing LED list
             pulsing_leds = list(led_controller.pulsing_outputs) if hasattr(led_controller, 'pulsing_outputs') else []
-            # Debug output
-            print(f"Visualizer: led_states={led_states}, pulsing_leds={pulsing_leds}")
-            # Broadcast to all connected clients
-            socketio.emit('led_update', {'led_states': led_states, 'stop_names': DEFAULT_STOP_NAMES.copy(), 'pulsing_leds': pulsing_leds})
+            # Debug output - get client count from sockets
+            client_count = len(socketio.server.eio.sockets)
+            print(f"Visualizer: led_states={led_states}, pulsing_leds={pulsing_leds}, clients={client_count}")
+            # Broadcast to all connected clients in the room
+            socketio.emit('led_update', {'led_states': led_states, 'stop_names': DEFAULT_STOP_NAMES.copy(), 'pulsing_leds': pulsing_leds}, room='led_visualizer')
+            # Broadcast client count
+            socketio.emit('client_count', {'count': client_count}, room='led_visualizer')
         threading.Event().wait(0.1)  # Check every 100ms
 
 
@@ -554,41 +557,59 @@ HTML_TEMPLATE = '''
                         }
                     }
                 }
+            });
 
-                // Update connection status
-                updateConnectionStatus();
+            // Handle client count updates
+            socket.on('client_count', function(data) {
+                const clientCountEl = document.getElementById('clientCount');
+                if (clientCountEl) {
+                    clientCountEl.textContent = data.count;
+                }
             });
 
             // Handle connection events
             socket.on('connect', function() {
                 console.log('Connected to LED visualizer');
+                // Join a room to receive broadcasts
+                socket.join('led_visualizer');
                 updateConnectionStatus(true);
             });
 
-            socket.on('disconnect', function() {
-                console.log('Disconnected from LED visualizer');
+            socket.on('disconnect', function(reason) {
+                console.log('Disconnected from LED visualizer', reason);
                 updateConnectionStatus(false);
             });
 
             socket.on('connect_error', function(err) {
                 console.error('Connection error:', err);
+                updateConnectionStatus(false);
             });
 
             // Update connection status display
             function updateConnectionStatus(connected) {
                 const statusDot = document.getElementById('connectionStatus');
                 const statusText = document.getElementById('connectionText');
-                statusDot.className = connected ? 'status-dot connected' : 'status-dot disconnected';
-                statusText.textContent = connected ? 'Connected' : 'Disconnected';
+                if (statusDot) {
+                    statusDot.className = connected ? 'status-dot connected' : 'status-dot disconnected';
+                }
+                if (statusText) {
+                    statusText.textContent = connected ? 'Connected' : 'Disconnected';
+                }
             }
 
             // Initialize brightness slider
             function initBrightnessSlider() {
                 const slider = document.getElementById('brightnessControl');
                 const valueDisplay = document.getElementById('brightnessValue');
+                const ledElement = document.getElementById('led-0');
 
                 slider.addEventListener('input', function() {
                     valueDisplay.textContent = this.value;
+                    // Actually set the brightness on the LED
+                    if (ledElement) {
+                        ledElement.style.background = this.value === '0' ? '#333333' : `rgba(255, 255, 0, ${this.value / 255})`;
+                        ledElement.style.boxShadow = this.value === '0' ? 'inset 0 2px 5px rgba(0, 0, 0, 0.5)' : `0 0 ${this.value}px rgba(255, 255, 0, ${this.value / 255}), inset 0 2px 5px rgba(0, 0, 0, 0.5)`;
+                    }
                 });
             }
         });
@@ -706,6 +727,26 @@ def index():
 def visualizer():
     """Alias for main visualizer page."""
     return render_template_string(HTML_TEMPLATE)
+
+
+# Socket.IO event handlers for connection tracking
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection."""
+    print('Client connected')
+    # Join the room so broadcasts reach this client
+    join_room('led_visualizer')
+    # Send current client count to the new client
+    client_count = len(socketio.server.eio.sockets.keys())
+    emit('client_count', {'count': client_count}, room='led_visualizer')
+
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection."""
+    print('Client disconnected')
+    # Leave the room on disconnect
+    leave_room('led_visualizer')
 
 
 @app.route('/api')
