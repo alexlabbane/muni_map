@@ -1,0 +1,96 @@
+# configs/j_line.yml
+name: J Line
+description: J line from Embarcadero to 30th St
+route_id: J
+
+# LED controllers - each is a separate node, can be mock or real
+led_controllers:
+  mock_j:
+    type: mock
+    id: mock_j
+    num_leds: 24
+    mock_led_id: 1
+
+global:
+  pulse_threshold: 600
+  solid_threshold: 30
+
+# Lines reference controllers by ID
+lines:
+  j_line:
+    name: J Line
+    route_id: J
+    controller: mock_j  # References the mock_j controller
+    stops:
+      - led_index: 0
+        stop_id: "16214"
+        stop_name: "20th St Right Of Way"
+        brightness: 64
+      - led_index: 1
+        stop_id: "13987"
+        stop_name: "Church St & 18th St"
+        brightness: 64
+      - led_index: 3
+        stop_id: "13984"
+        stop_name: "Church St & 16th St"
+        brightness: 64
+      - led_index: 4
+        stop_id: "18059"
+        stop_name: "Church St & Market St"
+        brightness: 64
+      - led_index: 5
+        stop_id: "16996"
+        stop_name: "Van Ness"
+        brightness: 64
+      - led_index: 7
+        stop_id: "16997"
+        stop_name: "Civic Center"
+        brightness: 64
+      - led_index: 8
+        stop_id: "16995"
+        stop_name: "Powell"
+        brightness: 64
+      - led_index: 9
+        stop_id: "16994"
+        stop_name: "Montgomery"
+        brightness: 64
+      - led_index: 10
+        stop_id: "17217"
+        stop_name: "Embarcadero"
+        brightness: 64
+      - led_index: 12
+        stop_id: "16221"
+        stop_name: "Liberty St"
+        brightness: 64
+      - led_index: 13
+        stop_id: "16216"
+        stop_name: "21st St"
+        brightness: 64
+      - led_index: 14
+        stop_id: "16218"
+        stop_name: "22nd St"
+        brightness: 64
+      - led_index: 15
+        stop_id: "13995"
+        stop_name: "24th St"
+        brightness: 64
+      - led_index: 17
+        stop_id: "18156"
+        stop_name: "26th St"
+        brightness: 64
+      - led_index: 19
+        stop_id: "18158"
+        stop_name: "28th St"
+        brightness: 64
+      - led_index: 20
+        stop_id: "14004"
+        stop_name: "Day St"
+        brightness: 64
+      - led_index: 21
+        stop_id: "16280"
+        stop_name: "Randall St"
+        brightness: 64
+      - led_index: 22
+        stop_id: "13538"
+        stop_name: "30th St & Dolores St"
+        brightness: 64

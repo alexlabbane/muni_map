@@ -300,8 +300,7 @@ def create_led_controller(bus_number=1, i2c_address=0x28, use_mock=False, stop_n
     Returns:
         LP5018 or MockLP5018 instance
     """
-    # Check environment variable for mock mode
-    if use_mock or os.environ.get('USE_MOCK_LED', '').lower() in ('1', 'true', 'yes'):
+    if use_mock:
         return MockLP5018(bus_number, i2c_address, stop_names)
     else:
         return LP5018(bus_number, i2c_address)

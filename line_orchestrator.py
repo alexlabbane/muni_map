@@ -5,7 +5,8 @@ from chip_ctrl import create_led_controller
 from web_led_visualizer import start_web_visualizer, DEFAULT_STOP_NAMES
 
 from gtfs_types import AgencyMetadata, FeedMetadata, Stop, Route, Trip, StopTime
-from typing import Dict
+from typing import Dict, Optional
+from config_loader import ConfigLoader, LineConfig, StopMapping
 
 import time
 import os
@@ -17,54 +18,60 @@ class ControlledStop:
     led_index: int
 
 class LineOrchestrator:
-    def __init__(self, agency: GtfsTransitAgency, route_id: str, controlled_stops: Dict[str, ControlledStop], use_mock_led=False):
+    def __init__(self, config_loader: ConfigLoader, line_name: str,
+                 led_controller=None, agency=None):
+        self.config_loader = config_loader
+        self.line_name = line_name
         self.agency = agency
-        self.route_id = route_id
-        self.controlled_stops = controlled_stops
-        # Create stop names mapping for visualization
-        # For demonstration, we'll use a more descriptive mapping
-        # In a real implementation, this would be retrieved from GTFS data
-        stop_names = {
-            stop.led_index: stop.stop_id for stop in controlled_stops.values()
-        }
-        # Override with more descriptive names where available
-        descriptive_names = {
-            0: "20th St Right Of Way",
-            1: "Church St & 18th St",
-            3: "Church St & 16th St",
-            4: "Church St & Market St",
-            5: "Van Ness",
-            7: "Civic Center",
-            8: "Powell",
-            9: "Montgomery",
-            10: "Embarcadero",
-            12: "Liberty St",
-            13: "21st St",
-            14: "22nd St",
-            15: "24th St",
-            17: "26th St",
-            19: "28th St",
-            20: "Day St",
-            21: "Randall St",
-            22: "30th St & Dolores St"
-        }
-        # Merge with the existing names to improve display
-        for led_index, name in descriptive_names.items():
-            if led_index in stop_names:
-                stop_names[led_index] = name
 
-        self.led_controller = create_led_controller(use_mock=use_mock_led, stop_names=stop_names)
+        line_config = config_loader.get_line(line_name)
+        if not line_config:
+            raise ValueError(f"Line '{line_name}' not found in config")
+
+        self.route_id = line_config.route_id
+
+        # Build controlled_stops from config
+        self.controlled_stops = {}
+        for stop in line_config.stops:
+            self.controlled_stops[stop.stop_id] = ControlledStop(
+                stop_id=stop.stop_id,
+                led_index=stop.led_index
+            )
+
+        # Create or use existing LED controller
+        if led_controller is None:
+            controller_config = config_loader.get_led_controller(line_config.controller)
+            stop_names = {
+                stop.led_index: stop.stop_name
+                for stop in line_config.stops
+            }
+            led_controller = create_led_controller(
+                use_mock=controller_config.type == 'mock',
+                stop_names=stop_names
+            )
+        self.led_controller = led_controller
+
+        self.pulse_threshold = line_config.pulse_threshold
+        self.solid_threshold = config_loader.global_config['solid_threshold']
+
+    def get_stop_name(self, led_index: int) -> str:
+        return self.config_loader.get_stop_name(self.line_name, led_index)
+
+    def get_stop_brightness(self, led_index: int) -> int:
+        return self.config_loader.get_stop_brightness(self.line_name, led_index)
 
     def update_leds(self):
         # Fetch real-time updates - use a larger time window to get more trips
+        if not self.agency:
+            raise RuntimeError("Agency not set. Cannot update LEDs without GTFS data.")
         stops = self.agency.stops(self.route_id, 7200)  # 2 hours instead of 5 minutes
 
         ### Default rules
         ### For each trip, if vehicle has left previous stop & is within 10 minutes of arrival, pulse the LED
         ### If the vehicle is within 30 seconds of arrival, keep the LED solid on
         ### Each trip will only have one LED on at a time. If multiple stops are within the threshold, light up closest.
-        pulsing_threshold = 600  # 10 minutes
-        solid_on_threshold = 30  # 30 seconds
+        pulsing_threshold = self.pulse_threshold
+        solid_on_threshold = self.solid_threshold
 
         pulsing = set()
         solid_on = set()
@@ -126,36 +133,29 @@ if __name__ == "__main__":
     use_mock = os.environ.get('USE_MOCK_LED', '').lower() in ('1', 'true', 'yes')
     print(f"USE_MOCK_LED: {use_mock}")
 
+    # Create agency and orchestrator with config loader
     muni = MuniTransitAgency()
-    controlled_stops = {
-        "17217": ControlledStop(stop_id="17217", led_index=10),  # Embarcadero
-        "16994": ControlledStop(stop_id="16994", led_index=9),  # Montgomery
-        "16995": ControlledStop(stop_id="16995", led_index=8),  # Powell
-        "16997": ControlledStop(stop_id="16997", led_index=7),  # Civic Center
-        "16996": ControlledStop(stop_id="16996", led_index=5),  # Van Ness
-        "18059": ControlledStop(stop_id="18059", led_index=4),  # Church St & Market St
-        "13984": ControlledStop(stop_id="13984", led_index=3),  # Church St & 16th St
-        "13987": ControlledStop(stop_id="13987", led_index=1),  # Church St & 18th St
-        "16214": ControlledStop(stop_id="16214", led_index=0),  # Right Of Way/20th St
-        "16221": ControlledStop(stop_id="16221", led_index=12),  # Right Of Way/Liberty St
-        "16216": ControlledStop(stop_id="16216", led_index=13),  # Right Of Way/21st St
-        "16218": ControlledStop(stop_id="16218", led_index=14),  # Church St & 22nd St
-        "13995": ControlledStop(stop_id="13995", led_index=15),  # Church St & 24th St
-        "18156": ControlledStop(stop_id="18156", led_index=17),  # Church St & 26th St
-        "18158": ControlledStop(stop_id="18158", led_index=19),  # Church St & 28th St
-        "14004": ControlledStop(stop_id="14004", led_index=20),  # Church St & Day St
-        "13538": ControlledStop(stop_id="13538", led_index=22),  # 30th St & Dolores St
-        "16280": ControlledStop(stop_id="16280", led_index=21),  # San Jose Ave & Randall St
-    }
 
-    orchestrator = LineOrchestrator(agency=muni, route_id="J", controlled_stops=controlled_stops, use_mock_led=use_mock)
+    orchestrator = LineOrchestrator(
+        config_loader=loader,
+        line_name="j_line",
+        use_mock_led=use_mock,
+        agency=muni
+    )
 
     # Check if we should start the web visualizer
     use_web_visualizer = os.environ.get('USE_WEB_VISUALIZER', '').lower() in ('1', 'true', 'yes')
 
     if use_web_visualizer and use_mock:
         # Start web visualizer in a separate thread, sharing the same LED controller
-        web_thread = threading.Thread(target=start_web_visualizer, args=(DEFAULT_STOP_NAMES, orchestrator.led_controller), daemon=True)
+        web_thread = threading.Thread(
+            target=start_web_visualizer,
+            args=(
+                {stop.led_index: stop.stop_name for stop in line_config.stops},
+                orchestrator.led_controller
+            ),
+            daemon=True
+        )
         web_thread.start()
         print("Web visualizer started. Access at http://localhost:5000")
         print("Press Ctrl+C to stop the server")
