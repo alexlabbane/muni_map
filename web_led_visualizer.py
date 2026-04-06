@@ -429,6 +429,35 @@ HTML_TEMPLATE = '''
         // Connect to Socket.IO server
         const socket = io();
 
+        // Connection status update function (defined outside DOMContentLoaded for socket handlers)
+      function updateConnectionStatus(connected) {
+          const statusDot = document.getElementById('connectionStatus');
+          const statusText = document.getElementById('connectionText');
+          if (statusDot) {
+              statusDot.className = connected ? 'status-dot connected' : 'status-dot disconnected';
+          }
+          if (statusText) {
+              statusText.textContent = connected ? 'Connected' : 'Disconnected';
+          }
+      }
+
+        // Handle connection events (must be defined before DOMContentLoaded)
+        socket.on('connect', function() {
+            console.log('>>> SOCKET CONNECTED');
+            updateConnectionStatus(true);
+            console.log('>>> Connection status updated to connected');
+        });
+
+        socket.on('disconnect', function(reason) {
+            console.log('Disconnected from LED visualizer', reason);
+            updateConnectionStatus(false);
+        });
+
+        socket.on('connect_error', function(err) {
+            console.error('Connection error:', err);
+            updateConnectionStatus(false);
+        });
+
         // Generate LED grid on page load
         document.addEventListener('DOMContentLoaded', function() {
             const ledGrid = document.getElementById('ledGrid');
@@ -530,38 +559,6 @@ HTML_TEMPLATE = '''
                     clientCountEl.textContent = data.count;
                 }
             });
-
-            // Handle connection events
-            socket.on('connect', function() {
-                console.log('Connected to LED visualizer');
-                // Join a room to receive broadcasts
-                socket.join('led_visualizer');
-                updateConnectionStatus(true);
-            });
-
-            socket.on('disconnect', function(reason) {
-                console.log('Disconnected from LED visualizer', reason);
-                updateConnectionStatus(false);
-            });
-
-            socket.on('connect_error', function(err) {
-                console.error('Connection error:', err);
-                updateConnectionStatus(false);
-            });
-
-            // Update connection status display
-            function updateConnectionStatus(connected) {
-                const statusDot = document.getElementById('connectionStatus');
-                const statusText = document.getElementById('connectionText');
-                if (statusDot) {
-                    statusDot.className = connected ? 'status-dot connected' : 'status-dot disconnected';
-                }
-                if (statusText) {
-                    statusText.textContent = connected ? 'Connected' : 'Disconnected';
-                }
-            }
-
-            // Update connection status display
         });
     </script>
 </body>
