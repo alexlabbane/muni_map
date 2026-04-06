@@ -205,31 +205,6 @@ HTML_TEMPLATE = '''
             }
         }
 
-        .controls {
-            display: flex;
-            gap: 15px;
-            margin-bottom: 20px;
-            flex-wrap: wrap;
-        }
-
-        .control-group {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255, 255, 255, 0.1);
-            padding: 10px 15px;
-            border-radius: 8px;
-        }
-
-        .control-group label {
-            font-weight: 600;
-        }
-
-        input[type="range"] {
-            width: 150px;
-            cursor: pointer;
-        }
-
         .led-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -418,14 +393,6 @@ HTML_TEMPLATE = '''
             </div>
         </div>
 
-        <div class="controls">
-            <div class="control-group">
-                <label for="brightnessControl">Adjust Brightness:</label>
-                <input type="range" id="brightnessControl" min="0" max="255" value="0">
-                <span id="brightnessValue">0</span>
-            </div>
-        </div>
-
         <div class="led-grid" id="ledGrid">
             <!-- LED containers will be generated here -->
         </div>
@@ -507,9 +474,6 @@ HTML_TEMPLATE = '''
 
                 ledGrid.appendChild(ledContainer);
             }
-
-            // Initialize brightness slider
-            initBrightnessSlider();
 
             // Handle incoming LED updates
             socket.on('led_update', function(data) {
@@ -597,21 +561,7 @@ HTML_TEMPLATE = '''
                 }
             }
 
-            // Initialize brightness slider
-            function initBrightnessSlider() {
-                const slider = document.getElementById('brightnessControl');
-                const valueDisplay = document.getElementById('brightnessValue');
-                const ledElement = document.getElementById('led-0');
-
-                slider.addEventListener('input', function() {
-                    valueDisplay.textContent = this.value;
-                    // Actually set the brightness on the LED
-                    if (ledElement) {
-                        ledElement.style.background = this.value === '0' ? '#333333' : `rgba(255, 255, 0, ${this.value / 255})`;
-                        ledElement.style.boxShadow = this.value === '0' ? 'inset 0 2px 5px rgba(0, 0, 0, 0.5)' : `0 0 ${this.value}px rgba(255, 255, 0, ${this.value / 255}), inset 0 2px 5px rgba(0, 0, 0, 0.5)`;
-                    }
-                });
-            }
+            // Update connection status display
         });
     </script>
 </body>
