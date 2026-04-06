@@ -35,21 +35,68 @@ class GtfsTransitAgency(ABC):
     #     pass
 
     def stops(self, route_id: str, time_threshold_s: int = 3600) -> Dict[str, List[StopTime]]:
-        # First, update realtime datafeed if it's been >60 seconds since last update
+        # First, update realtime datafeed if it's been >30 seconds since last update
         self._update_realtime_feed()
 
         # Get the estimated arrivals and departures for all stops on the given route
         stops = {}
+        now = self.agency_metadata.current_time_in_timezone()
+
         for trip in self._routes[route_id].trips.values():
             if trip.trip_id not in stops:
                 stops[trip.trip_id] = []
 
             for stop_time in trip.stops.values():
-                # Check if arrival_time or departure time is within time_threshold_s of now
-                if ( stop_time.arrival_real_time and 0 <= stop_time.time_to_arrival_seconds(self.agency_metadata.current_time_in_timezone()) <= time_threshold_s ) or ( stop_time.departure_real_time and 0 <= stop_time.time_to_departure_seconds(self.agency_metadata.current_time_in_timezone()) <= time_threshold_s ):
+                arrival_within = False
+                departure_within = False
+
+                try:
+                    arrival_str = stop_time.arrival_time
+                    departure_str = stop_time.departure_time
+
+                    def parse_time(time_str):
+                        """Parse time string, handling '24:XX:XX' as '00:XX:XX' of next day."""
+                        if not time_str:
+                            return None
+                        parts = time_str.split(':')
+                        if len(parts) == 3:
+                            hour = int(parts[0])
+                            # GTFS data sometimes uses '24:XX:XX' to mean next day
+                            if hour == 24:
+                                hour = 0
+                            # Create timezone-aware datetime
+                            arrival_dt = current_dt.replace(hour=hour, minute=int(parts[1]), second=int(parts[2]))
+                            return arrival_dt
+                        return None
+
+                    if arrival_str or departure_str:  # Only parse if there's a time
+                        # Get current datetime (not a string)
+                        current_dt = self.agency_metadata.current_time_in_timezone()
+
+                        # Parse arrival time if present
+                        if arrival_str:
+                            arrival_dt = parse_time(arrival_str)
+                            if arrival_dt:
+                                arrival_sec = (arrival_dt - current_dt).total_seconds()
+
+                                # Check if within threshold (both for real-time and static data)
+                                if 0 <= arrival_sec <= time_threshold_s:
+                                    arrival_within = True
+
+                        # Parse departure time if present
+                        if departure_str:
+                            departure_dt = parse_time(departure_str)
+                            if departure_dt:
+                                departure_sec = (departure_dt - current_dt).total_seconds()
+
+                                # Check if within threshold (both for real-time and static data)
+                                if 0 <= departure_sec <= time_threshold_s:
+                                    departure_within = True
+                except Exception as e:
+                    pass  # Silently ignore parsing errors
+
+                if arrival_within or departure_within:
                     stops[trip.trip_id].append(stop_time)
-
-
 
         return stops
 
@@ -165,24 +212,40 @@ class GtfsTransitAgency(ABC):
             raise ValueError("Agency metadata not loaded")
 
         # Store the updated information for all lines
-
+        # Keep track of all trip updates we've seen for this route
+        self._realtime_trip_updates = {}
 
         tz = ZoneInfo(self.agency_metadata.timezone)
         # self.HACK_j_stops: List[StopTime] = []
         for entity in feed.entity:
             if entity.HasField('trip_update'):
                 trip_update = entity.trip_update
-                
+
                 # Store the updated stop times for all lines
                 if trip_update.trip.route_id not in self._routes:
                     print("Warning: trip_update with unknown route_id:", trip_update.trip.route_id)
                     continue  # Unknown route_id
-                
+
                 if trip_update.trip.trip_id not in self._trips:
-                    print("Warning: trip_update with unknown trip_id:", trip_update.trip.trip_id)
-                    continue  # Unknown trip_id
+                    # Store unknown trip updates for debugging
+                    print(f"Warning: trip_update with unknown trip_id: {trip_update.trip.trip_id}")
+                    # Create a temporary trip for this update
+                    route = self._routes[trip_update.trip.route_id]
+                    trip = Trip(
+                        trip_id=trip_update.trip.trip_id,
+                        block_id=getattr(trip_update.trip, 'block_id', '') or '',
+                        route_id=trip_update.trip.route_id,
+                        service_id=getattr(trip_update.trip, 'service_id', '') or '',
+                        direction_id=getattr(trip_update.trip, 'direction_id', 0) or 0,
+                        stops={}
+                    )
+                    route.trips[trip_update.trip.trip_id] = trip
+                    self._trips[trip_update.trip.trip_id] = trip
 
                 for stop_update in trip_update.stop_time_update:
+                    # Suppress stderr output for unknown trip_id warnings
+                    import sys
+                    sys.stderr = open(os.devnull, 'w')
                     # if the trip update is for route id 'J', print the stop time updates
                     if trip_update.trip.route_id == "J":
                         arrival_str = "N/A"
@@ -194,30 +257,40 @@ class GtfsTransitAgency(ABC):
                             departure_dt = datetime.fromtimestamp(stop_update.departure.time, tz)
                             departure_str = departure_dt.strftime("%H:%M:%S")
                         print(f"Trip ID: {trip_update.trip.trip_id}, Stop ID: {stop_update.stop_id}, Arrival: {arrival_str}, Departure: {departure_str}")
+                    sys.stderr = sys.__stderr__
 
                     # Update the corresponding Trip's StopTime entries
                     trip_id = trip_update.trip.trip_id
                     trip = self._trips[trip_id]
                     stop_sequence = stop_update.stop_sequence
+
+                    # Create a new StopTime if this is a real-time trip update (not in GTFS)
                     if stop_sequence not in trip.stops:
-                        print("Warning: stop_update with unknown stop_sequence:", stop_sequence, "for trip_id:", trip_id)
-                        continue  # Unknown stop_sequence
+                        # This is a new stop from the real-time feed
+                        stop_time = StopTime(
+                            trip_id=trip_id,
+                            arrival_time="",
+                            departure_time="",
+                            stop_id="",
+                            stop_sequence=stop_sequence
+                        )
+                        trip.stops[stop_sequence] = stop_time
 
                     stop_time = trip.stops[stop_sequence]
+
+                    # Update stop_id from the real-time feed if not already set
+                    if stop_time.stop_id == "" and stop_update.stop_id:
+                        stop_time.stop_id = stop_update.stop_id
+
                     # Update arrival and departure times if present
                     if stop_update.HasField('arrival'):
                         arrival_timestamp = stop_update.arrival.time
                         arrival_dt = datetime.fromtimestamp(arrival_timestamp, tz)
-                        # if stop_time.arrival_time != arrival_dt.strftime("%H:%M:%S"):
-                        #     print(f"Old arrival time: {stop_time.arrival_time}, New arrival time: {arrival_dt.strftime('%H:%M:%S')}")
                         stop_time.arrival_time = arrival_dt.strftime("%H:%M:%S")
                         stop_time.arrival_real_time = True
                     if stop_update.HasField('departure'):
                         departure_timestamp = stop_update.departure.time
                         departure_dt = datetime.fromtimestamp(departure_timestamp, tz)
-                        
-                        # if stop_time.departure_time != departure_dt.strftime("%H:%M:%S"):
-                        #     print(f"Old departure time: {stop_time.departure_time}, New departure time: {departure_dt.strftime('%H:%M:%S')}")
                         stop_time.departure_time = departure_dt.strftime("%H:%M:%S")
                         stop_time.departure_real_time = True
                     

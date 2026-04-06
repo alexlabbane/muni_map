@@ -268,11 +268,19 @@ class MockLP5018:
 
     def get_led_state(self, output: int) -> int:
         """Get the current brightness of a specific LED output."""
+        # If LED is pulsing, return a medium brightness value for visualization
+        if output in self.pulsing_outputs:
+            return 128
         return self.led_states.get(output, 0)
 
     def get_all_led_states(self) -> dict:
         """Get all LED states."""
-        return self.led_states.copy()
+        # Create a copy of led_states and update brightness for pulsing LEDs
+        states = self.led_states.copy()
+        for output in self.pulsing_outputs:
+            # If LED is pulsing, return a medium brightness value for visualization
+            states[output] = 128
+        return states
 
     def clear_pulsing_outputs(self):
         """Clear all pulsing outputs."""

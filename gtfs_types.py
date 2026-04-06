@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import Dict, List
+from datetime import datetime
 
 # Static GTFS Data - should be primary keyed by first field
 # TODO: Still need to decide the best way to organize the data to make it easy to query/update with real-time feed
@@ -21,12 +22,11 @@ class AgencyMetadata:
     name: str
     timezone: str
 
-    def current_time_in_timezone(self) -> str:
+    def current_time_in_timezone(self) -> datetime:
         from datetime import datetime
         from zoneinfo import ZoneInfo
 
-        now = datetime.now(ZoneInfo(self.timezone))
-        return now.strftime("%H:%M:%S")
+        return datetime.now(ZoneInfo(self.timezone))
 
 # From stops.txt
 @dataclass
@@ -66,33 +66,61 @@ class StopTime:
     arrival_real_time: bool = False  # Indicates if this stop time has been updated with real-time data
     departure_real_time: bool = False  # Indicates if this stop time has been updated with real-time data
 
-    def time_to_departure_seconds(self, current_time: str) -> int:
-        """Calculate time to departure in seconds from current_time (HH:MM:SS)."""
-        h1, m1, s1 = map(int, self.departure_time.split(":"))
-        h2, m2, s2 = map(int, current_time.split(":"))
-        dep_seconds = h1 * 3600 + m1 * 60 + s1
-        curr_seconds = h2 * 3600 + m2 * 60 + s2
+    def time_to_departure_seconds(self, current_time) -> int:
+        """Calculate time to departure in seconds from current_time (HH:MM:SS or datetime)."""
+        if not self.departure_time or self.departure_time.strip() == "":
+            return None
 
-        # Edge case: if the current time is just before midnight and departure is just after midnight,
-        # departure time should be considered as next day
-        if dep_seconds < curr_seconds:
-            dep_seconds += 24 * 3600
+        try:
+            h1, m1, s1 = map(int, self.departure_time.split(":"))
+            dep_seconds = h1 * 3600 + m1 * 60 + s1
 
-        return dep_seconds - curr_seconds
+            # Handle both datetime objects and strings
+            if hasattr(current_time, 'hour'):
+                # It's a datetime object
+                h2, m2, s2 = current_time.hour, current_time.minute, current_time.second
+            else:
+                # It's a string
+                h2, m2, s2 = map(int, current_time.split(":"))
 
-    def time_to_arrival_seconds(self, current_time: str) -> int:
-        """Calculate time to arrival in seconds from current_time (HH:MM:SS)."""
-        h1, m1, s1 = map(int, self.arrival_time.split(":"))
-        h2, m2, s2 = map(int, current_time.split(":"))
-        arr_seconds = h1 * 3600 + m1 * 60 + s1
-        curr_seconds = h2 * 3600 + m2 * 60 + s2
+            curr_seconds = h2 * 3600 + m2 * 60 + s2
 
-        # Edge case: if the current time is just before midnight and arrival is just after midnight,
-        # arrival time should be considered as next day
-        if arr_seconds < curr_seconds:
-            arr_seconds += 24 * 3600
+            # Edge case: if the current time is just before midnight and departure is just after midnight,
+            # departure time should be considered as next day
+            if dep_seconds < curr_seconds:
+                dep_seconds += 24 * 3600
 
-        return arr_seconds - curr_seconds
+            return dep_seconds - curr_seconds
+        except (ValueError, AttributeError):
+            return None
+
+    def time_to_arrival_seconds(self, current_time) -> int:
+        """Calculate time to arrival in seconds from current_time (HH:MM:SS or datetime)."""
+        if not self.arrival_time or self.arrival_time.strip() == "":
+            return None
+
+        try:
+            h1, m1, s1 = map(int, self.arrival_time.split(":"))
+            arr_seconds = h1 * 3600 + m1 * 60 + s1
+
+            # Handle both datetime objects and strings
+            if hasattr(current_time, 'hour'):
+                # It's a datetime object
+                h2, m2, s2 = current_time.hour, current_time.minute, current_time.second
+            else:
+                # It's a string
+                h2, m2, s2 = map(int, current_time.split(":"))
+
+            curr_seconds = h2 * 3600 + m2 * 60 + s2
+
+            # Edge case: if the current time is just before midnight and arrival is just after midnight,
+            # arrival time should be considered as next day
+            if arr_seconds < curr_seconds:
+                arr_seconds += 24 * 3600
+
+            return arr_seconds - curr_seconds
+        except (ValueError, AttributeError):
+            return None
 
 # TODO: Figure out exactly how we need to use this one...
 # Default is every day of week service if no calendar is listed

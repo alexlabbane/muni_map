@@ -2,11 +2,14 @@ from dataclasses import dataclass
 from bay_transit_agency import MuniTransitAgency
 from gtfs_transit_agency import GtfsTransitAgency
 from chip_ctrl import create_led_controller
+from web_led_visualizer import start_web_visualizer, DEFAULT_STOP_NAMES
 
 from gtfs_types import AgencyMetadata, FeedMetadata, Stop, Route, Trip, StopTime
 from typing import Dict
 
 import time
+import os
+import threading
 
 @dataclass
 class ControlledStop:
@@ -53,15 +56,15 @@ class LineOrchestrator:
         self.led_controller = create_led_controller(use_mock=use_mock_led, stop_names=stop_names)
 
     def update_leds(self):
-        # Fetch real-time updates
-        stops = self.agency.stops(self.route_id, 300)
+        # Fetch real-time updates - use a larger time window to get more trips
+        stops = self.agency.stops(self.route_id, 7200)  # 2 hours instead of 5 minutes
 
         ### Default rules
-        ### For each trip, if vehicle has left previous stop & is within 60 seconds of arrival, pulse the LED
-        ### If the vehicle is <30 seconds away, keep the LED solid on
-        ### Each trip will only have one LED on at a time. If multiple stops are within 30 seconds, light up closest.
-        pulsing_threshold = 300  # seconds
-        solid_on_threshold = 30  # seconds
+        ### For each trip, if vehicle has left previous stop & is within 10 minutes of arrival, pulse the LED
+        ### If the vehicle is within 30 seconds of arrival, keep the LED solid on
+        ### Each trip will only have one LED on at a time. If multiple stops are within the threshold, light up closest.
+        pulsing_threshold = 600  # 10 minutes
+        solid_on_threshold = 30  # 30 seconds
 
         pulsing = set()
         solid_on = set()
@@ -76,9 +79,16 @@ class LineOrchestrator:
             closest_stop = None
             min_delta = int(1e9)
             for stop_time in stop_times:
-                delta = min(
-                    stop_time.time_to_arrival_seconds(self.agency.agency_metadata.current_time_in_timezone()),
-                    stop_time.time_to_departure_seconds(self.agency.agency_metadata.current_time_in_timezone()))
+                arrival_delta = stop_time.time_to_arrival_seconds(self.agency.agency_metadata.current_time_in_timezone())
+                departure_delta = stop_time.time_to_departure_seconds(self.agency.agency_metadata.current_time_in_timezone())
+
+                # Only consider non-None deltas
+                if arrival_delta is not None:
+                    delta = min(min_delta, arrival_delta)
+                elif departure_delta is not None:
+                    delta = min(min_delta, departure_delta)
+                else:
+                    continue
 
                 # Update closest stop
                 if 0 <= delta < min_delta:
@@ -93,8 +103,12 @@ class LineOrchestrator:
                 elif min_delta <= pulsing_threshold:
                     pulsing.add(self.controlled_stops[closest_stop.stop_id].led_index)
 
-            if closest_stop is not None:
-                print(f"Trip {trip_id} closest stop {closest_stop.stop_id} in {min_delta} seconds")
+            if closest_stop is not None and closest_stop.stop_id in self.controlled_stops:
+                led_index = self.controlled_stops[closest_stop.stop_id].led_index
+                if min_delta <= solid_on_threshold:
+                    solid_on.add(led_index)
+                elif min_delta <= pulsing_threshold:
+                    pulsing.add(led_index)
 
         # If LED is both pulsing and solid on, remove from pulsing
         pulsing = pulsing - solid_on
@@ -102,20 +116,15 @@ class LineOrchestrator:
             if stop.led_index not in pulsing and stop.led_index not in solid_on:
                 self.led_controller.set_brightness(stop.led_index, 0)  # Turn off
         # Update LED controller
-        print(f"Setting pulsing LEDs: {pulsing}, solid on LEDs: {solid_on}")
-
         self.led_controller.set_pulsed_outputs(list(pulsing))
         for led in solid_on:
             self.led_controller.set_brightness(led, 64) # Quarter brightness
 
 if __name__ == "__main__":
     # For testing, you can use the mock controller by setting use_mock_led=True
-    use_mock = False
-    if "USE_MOCK_LED" in globals() or "USE_MOCK_LED" in locals():
-        use_mock = True
-    else:
-        import os
-        use_mock = os.environ.get('USE_MOCK_LED', '').lower() in ('1', 'true', 'yes')
+    import os
+    use_mock = os.environ.get('USE_MOCK_LED', '').lower() in ('1', 'true', 'yes')
+    print(f"USE_MOCK_LED: {use_mock}")
 
     muni = MuniTransitAgency()
     controlled_stops = {
@@ -140,6 +149,17 @@ if __name__ == "__main__":
     }
 
     orchestrator = LineOrchestrator(agency=muni, route_id="J", controlled_stops=controlled_stops, use_mock_led=use_mock)
+
+    # Check if we should start the web visualizer
+    use_web_visualizer = os.environ.get('USE_WEB_VISUALIZER', '').lower() in ('1', 'true', 'yes')
+
+    if use_web_visualizer and use_mock:
+        # Start web visualizer in a separate thread, sharing the same LED controller
+        web_thread = threading.Thread(target=start_web_visualizer, args=(DEFAULT_STOP_NAMES, orchestrator.led_controller), daemon=True)
+        web_thread.start()
+        print("Web visualizer started. Access at http://localhost:5000")
+        print("Press Ctrl+C to stop the server")
+
     try:
         while True:
             orchestrator.update_leds()
